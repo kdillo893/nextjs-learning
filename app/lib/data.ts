@@ -1,4 +1,4 @@
-import { sql } from '@vercel/postgres';
+import { Client } from 'pg';
 import {
   CustomerField,
   CustomersTable,
@@ -10,9 +10,21 @@ import {
 } from './definitions';
 import { formatCurrency } from './utils';
 
+async function createClient () {
+
+  const client = await new Client();
+  client.connect();
+
+  const schema = process.env.PGSCHEMA;
+  await client.query(`SET search_path TO "${schema}"`);
+
+  return client;
+}
+
 export async function fetchRevenue() {
   // Add noStore() here prevent the response from being cached.
   // This is equivalent to in fetch(..., {cache: 'no-store'}).
+  const client = await createClient();
 
   try {
     // Artificially delay a reponse for demo purposes.
@@ -21,27 +33,31 @@ export async function fetchRevenue() {
     // console.log('Fetching revenue data...');
     // await new Promise((resolve) => setTimeout(resolve, 3000));
 
-    const data = await sql<Revenue>`SELECT * FROM revenue`;
+    const data = await client.query(`SELECT * FROM revenue`);
 
     // console.log('Data fetch complete after 3 seconds.');
 
-    return data.rows;
+    return data.rows as Revenue[];
   } catch (error) {
     console.error('Database Error:', error);
-    throw new Error('Failed to fetch revenue data.');
+    throw new Error('Failed to fetch revenue data.' + client.database);
+  } finally {
+    client.end()
   }
 }
 
 export async function fetchLatestInvoices() {
+  const client = await createClient();
+
   try {
-    const data = await sql<LatestInvoiceRaw>`
+    const data = await client.query(`
       SELECT invoices.amount, customers.name, customers.image_url, customers.email, invoices.id
       FROM invoices
       JOIN customers ON invoices.customer_id = customers.id
       ORDER BY invoices.date DESC
-      LIMIT 5`;
+      LIMIT 5`);
 
-    const latestInvoices = data.rows.map((invoice) => ({
+    const latestInvoices = data.rows.map((invoice: LatestInvoiceRaw) => ({
       ...invoice,
       amount: formatCurrency(invoice.amount),
     }));
@@ -49,20 +65,25 @@ export async function fetchLatestInvoices() {
   } catch (error) {
     console.error('Database Error:', error);
     throw new Error('Failed to fetch the latest invoices.');
+  } finally {
+    client.end()
   }
 }
 
 export async function fetchCardData() {
+
+  const client = await createClient();
+
   try {
     // You can probably combine these into a single SQL query
     // However, we are intentionally splitting them to demonstrate
     // how to initialize multiple queries in parallel with JS.
-    const invoiceCountPromise = sql`SELECT COUNT(*) FROM invoices`;
-    const customerCountPromise = sql`SELECT COUNT(*) FROM customers`;
-    const invoiceStatusPromise = sql`SELECT
+    const invoiceCountPromise = client.query(`SELECT COUNT(*) FROM invoices`);
+    const customerCountPromise = client.query(`SELECT COUNT(*) FROM customers`);
+    const invoiceStatusPromise = client.query(`SELECT
          SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END) AS "paid",
          SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END) AS "pending"
-         FROM invoices`;
+         FROM invoices`);
 
     const data = await Promise.all([
       invoiceCountPromise,
@@ -84,6 +105,8 @@ export async function fetchCardData() {
   } catch (error) {
     console.error('Database Error:', error);
     throw new Error('Failed to card data.');
+  } finally {
+    client.end()
   }
 }
 
@@ -94,8 +117,10 @@ export async function fetchFilteredInvoices(
 ) {
   const offset = (currentPage - 1) * ITEMS_PER_PAGE;
 
+  const client = await createClient();
+
   try {
-    const invoices = await sql<InvoicesTable>`
+    const invoices = await client.query(`
       SELECT
         invoices.id,
         invoices.amount,
@@ -114,18 +139,22 @@ export async function fetchFilteredInvoices(
         invoices.status ILIKE ${`%${query}%`}
       ORDER BY invoices.date DESC
       LIMIT ${ITEMS_PER_PAGE} OFFSET ${offset}
-    `;
+    `);
 
-    return invoices.rows;
+    return invoices.rows as InvoicesTable[];
   } catch (error) {
     console.error('Database Error:', error);
     throw new Error('Failed to fetch invoices.');
+  } finally {
+    client.end()
   }
 }
 
 export async function fetchInvoicesPages(query: string) {
+  const client = await createClient();
+
   try {
-    const count = await sql`SELECT COUNT(*)
+    const count = await client.query(`SELECT COUNT(*)
     FROM invoices
     JOIN customers ON invoices.customer_id = customers.id
     WHERE
@@ -134,19 +163,23 @@ export async function fetchInvoicesPages(query: string) {
       invoices.amount::text ILIKE ${`%${query}%`} OR
       invoices.date::text ILIKE ${`%${query}%`} OR
       invoices.status ILIKE ${`%${query}%`}
-  `;
+  `);
 
     const totalPages = Math.ceil(Number(count.rows[0].count) / ITEMS_PER_PAGE);
     return totalPages;
   } catch (error) {
     console.error('Database Error:', error);
     throw new Error('Failed to fetch total number of invoices.');
+  } finally {
+    client.end()
   }
 }
 
 export async function fetchInvoiceById(id: string) {
+  const client = await createClient();
+
   try {
-    const data = await sql<InvoiceForm>`
+    const data = await client.query(`
       SELECT
         invoices.id,
         invoices.customer_id,
@@ -154,7 +187,7 @@ export async function fetchInvoiceById(id: string) {
         invoices.status
       FROM invoices
       WHERE invoices.id = ${id};
-    `;
+    `);
 
     const invoice = data.rows.map((invoice) => ({
       ...invoice,
@@ -162,33 +195,41 @@ export async function fetchInvoiceById(id: string) {
       amount: invoice.amount / 100,
     }));
 
-    return invoice[0];
+    return invoice[0] as InvoiceForm;
   } catch (error) {
     console.error('Database Error:', error);
+  } finally {
+    client.end()
   }
 }
 
 export async function fetchCustomers() {
+  const client = await createClient();
+
   try {
-    const data = await sql<CustomerField>`
+    const data = await client.query(`
       SELECT
         id,
         name
       FROM customers
       ORDER BY name ASC
-    `;
+    `);
 
-    const customers = data.rows;
+    const customers = data.rows as CustomerField[];
     return customers;
   } catch (err) {
     console.error('Database Error:', err);
     throw new Error('Failed to fetch all customers.');
+  } finally {
+    client.end()
   }
 }
 
 export async function fetchFilteredCustomers(query: string) {
+  const client = await createClient();
+
   try {
-    const data = await sql<CustomersTable>`
+    const data = await client.query(`
 		SELECT
 		  customers.id,
 		  customers.name,
@@ -204,9 +245,9 @@ export async function fetchFilteredCustomers(query: string) {
         customers.email ILIKE ${`%${query}%`}
 		GROUP BY customers.id, customers.name, customers.email, customers.image_url
 		ORDER BY customers.name ASC
-	  `;
+	  `);
 
-    const customers = data.rows.map((customer) => ({
+    const customers = data.rows.map((customer : CustomersTable) => ({
       ...customer,
       total_pending: formatCurrency(customer.total_pending),
       total_paid: formatCurrency(customer.total_paid),
@@ -216,15 +257,21 @@ export async function fetchFilteredCustomers(query: string) {
   } catch (err) {
     console.error('Database Error:', err);
     throw new Error('Failed to fetch customer table.');
+  } finally {
+    client.end()
   }
 }
 
 export async function getUser(email: string) {
+  const client = await createClient();
+
   try {
-    const user = await sql`SELECT * from USERS where email=${email}`;
+    const user = await client.query(`SELECT * from USERS where email=${email}`);
     return user.rows[0] as User;
   } catch (error) {
     console.error('Failed to fetch user:', error);
     throw new Error('Failed to fetch user.');
+  } finally {
+    client.end()
   }
 }
