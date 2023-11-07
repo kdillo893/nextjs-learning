@@ -137,14 +137,18 @@ export async function fetchFilteredInvoices(
       FROM invoices
       JOIN customers ON invoices.customer_id = customers.id
       WHERE
-        customers.name ILIKE ${`%${query}%`} OR
-        customers.email ILIKE ${`%${query}%`} OR
-        invoices.amount::text ILIKE ${`%${query}%`} OR
-        invoices.date::text ILIKE ${`%${query}%`} OR
-        invoices.status ILIKE ${`%${query}%`}
+        customers.name ILIKE '%${query}%' OR
+        customers.email ILIKE '%${query}%' OR
+        invoices.amount::text ILIKE '%${query}%' OR
+        invoices.date::text ILIKE '%${query}%' OR
+        invoices.status ILIKE '%${query}%'
       ORDER BY invoices.date DESC
-      LIMIT ${ITEMS_PER_PAGE} OFFSET ${offset}
-    `);
+      LIMIT $1 OFFSET $2
+    `, [ITEMS_PER_PAGE, offset]);
+
+
+    console.log(invoices);
+
 
     return invoices.rows as InvoicesTable[];
   } catch (error) {
@@ -164,12 +168,12 @@ export async function fetchInvoicesPages(query: string) {
     FROM invoices
     JOIN customers ON invoices.customer_id = customers.id
     WHERE
-      customers.name ILIKE ${`%${query}%`} OR
-      customers.email ILIKE ${`%${query}%`} OR
-      invoices.amount::text ILIKE ${`%${query}%`} OR
-      invoices.date::text ILIKE ${`%${query}%`} OR
-      invoices.status ILIKE ${`%${query}%`}
-  `);
+      customers.name ILIKE '%${query}%' OR
+      customers.email ILIKE '%${query}%' OR
+      invoices.amount::text ILIKE '%${query}%' OR
+      invoices.date::text ILIKE '%${query}%' OR
+      invoices.status ILIKE '%${query}%'
+  ` );
 
     const totalPages = Math.ceil(Number(count.rows[0].count) / ITEMS_PER_PAGE);
     return totalPages;
@@ -250,8 +254,8 @@ export async function fetchFilteredCustomers(query: string) {
 		FROM customers
 		LEFT JOIN invoices ON customers.id = invoices.customer_id
 		WHERE
-		  customers.name ILIKE ${`%${query}%`} OR
-        customers.email ILIKE ${`%${query}%`}
+		  customers.name ILIKE '%${query}%' OR
+        customers.email ILIKE '%${query}%'
 		GROUP BY customers.id, customers.name, customers.email, customers.image_url
 		ORDER BY customers.name ASC
 	  `);
